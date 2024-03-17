@@ -1,29 +1,40 @@
 from datetime import timedelta
-import sys
 import randpass
 import puzzle
 
-if __name__ == '__main__':
-    command = sys.argv[1]
+import typer
 
-    if command == 'generate':
-        length = int(sys.argv[2])
-        password = randpass.generate(length)
-        print(password)
-    elif command == 'encrypt':
-        seed = sys.argv[2]
-        time = float(sys.argv[3])
-        value = sys.argv[4]
+app = typer.Typer(help="Password obsfucation utility.")
 
-        delta = timedelta(seconds=time)
-        _, iters, encrypted = puzzle.encrypt(seed, delta, value)
 
-        print(iters)
-        print(encrypted)
-    elif command == 'decrypt':
-        seed = sys.argv[2]
-        iters = int(sys.argv[3])
-        value = sys.argv[4]
-        _, decrypted = puzzle.decrypt(seed, iters, value)
+@app.command()
+def generate(length: int) -> None:
+    """
+    Generate a random password with a given length.
+    """
+    password = randpass.generate(length)
+    print(password)
 
-        print(decrypted)
+
+@app.command()
+def encrypt(seed: str, time: int, value: str) -> None:
+    """
+    Encrypt a value with the intention to decrypt it later spending X amount of time.
+    """
+    delta = timedelta(seconds=time)
+    _, iters, encrypted = puzzle.encrypt(seed, delta, value)
+    print(iters)
+    print(encrypted)
+
+
+@app.command()
+def decrypt(seed: str, iters: int, value: str) -> None:
+    """
+    Decrypt a value encrypted with the encrypt command.
+    """
+    _, decrypted = puzzle.decrypt(seed, iters, value)
+    print(decrypted)
+
+
+if __name__ == "__main__":
+    app()
