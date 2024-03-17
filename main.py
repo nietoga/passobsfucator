@@ -25,6 +25,7 @@ def encrypt(seed: str, time: int, value: str) -> None:
     delta = timedelta(seconds=time)
     progress_bar = ProgressBar()
     _, iters, encrypted = puzzle.encrypt(seed, delta, value, progress_bar.set_progress)
+    progress_bar.close()
     print(iters)
     print(encrypted)
 
@@ -36,6 +37,7 @@ def decrypt(seed: str, iters: int, value: str) -> None:
     """
     progress_bar = ProgressBar()
     _, decrypted = puzzle.decrypt(seed, iters, value, progress_bar.set_progress)
+    progress_bar.close()
     print(decrypted)
 
 

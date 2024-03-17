@@ -6,7 +6,7 @@ class ProgressBar:
         self._percentage = 0
         self._pbar = tqdm(range(100))
 
-    def set_progress(self, percentage: int):
+    def set_progress(self, percentage: int) -> None:
         percentage = max(min(percentage, 100), 0)
         change = percentage - self._percentage
 
@@ -16,3 +16,6 @@ class ProgressBar:
 
         if percentage == 100:
             self._pbar.close()
+
+    def close(self) -> None:
+        self._pbar.close()
