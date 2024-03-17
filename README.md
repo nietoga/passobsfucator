@@ -38,3 +38,7 @@ Arguments: `<seed> <iterations> <encrypted-value>`
 python main.py decrypt 1234 26432284 gAAAAABl71sK37AGmrBcHxd07aHNcwnK7eRam70VXWd2uYvMTs4L_aZIs6cOzlE2PCRA5sKdPzLvAXD-QPoGo0Z7Yi__h-vUeg==
 b'B`Bxu+I1z7'
 ```
+
+# Pending work
+
+* I just noticed that type annotations in Python are not really strict. In particular, in the module `puzzle.py` I'm working with `bytes` as if they were `str`. They aren't, and that should be fixed.
