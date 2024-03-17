@@ -30,6 +30,7 @@ def generate_by_time(
         current = time()
         iters += 1
 
+    progress_callback(100)
     return base64.urlsafe_b64encode(h), iters
 
 
@@ -47,6 +48,7 @@ def generate_by_iters(
             progress = int((i + 1) * 100 / iters)
             progress_callback(progress)
 
+    progress_callback(100)
     return base64.urlsafe_b64encode(h)
 
 
