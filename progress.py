@@ -13,3 +13,6 @@ class ProgressBar:
         if change > 0:
             self._percentage = percentage
             self._pbar.update(change)
+
+        if percentage == 100:
+            self._pbar.close()
