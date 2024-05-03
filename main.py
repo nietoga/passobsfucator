@@ -9,7 +9,7 @@ app = typer.Typer(help="Password obsfucation utility.")
 
 
 @app.command()
-def generate(length: int) -> None:
+def generate_password(length: int = 10) -> None:
     """
     Generate a random password with a given length.
     """
