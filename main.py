@@ -33,7 +33,9 @@ def encrypt(
     """
     delta = timedelta(seconds=time_in_seconds)
     progress_bar = ProgressBar()
-    _, iters, encrypted = puzzle.encrypt(seed, delta, value, progress_bar.set_progress)
+    _, iters, encrypted = puzzle.encrypt(
+        seed.encode(), delta, value.encode(), progress_bar.set_progress
+    )
     progress_bar.close()
 
     output_dict = {
@@ -59,13 +61,15 @@ def decrypt(
     """
     with open(input_file, "r") as input_file:
         input_dict = json.load(input_file)
-        seed = input_dict["seed"]
-        iters = input_dict["iters"]
-        value = input_dict["encrypted"]
+        seed: str = input_dict["seed"]
+        iters: int = input_dict["iters"]
+        value: str = input_dict["encrypted"]
 
     start = datetime.now()
     progress_bar = ProgressBar()
-    _, decrypted = puzzle.decrypt(seed, iters, value, progress_bar.set_progress)
+    _, decrypted = puzzle.decrypt(
+        seed.encode(), iters, value.encode(), progress_bar.set_progress
+    )
     progress_bar.close()
     end = datetime.now()
 
