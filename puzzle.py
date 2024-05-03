@@ -9,14 +9,14 @@ from hashlib import sha256
 
 
 def generate_by_time(
-    seed: str,
+    seed: bytes,
     delta: timedelta,
     progress_callback: Callable[[int], None] | None = None,
-) -> tuple[str, int]:
+) -> tuple[bytes, int]:
     start = time()
     end = start + delta.total_seconds()
 
-    h = sha256(seed.encode()).digest()
+    h = sha256(seed).digest()
     iters = 0
 
     current = start
@@ -37,11 +37,11 @@ def generate_by_time(
 
 
 def generate_by_iters(
-    seed: str,
+    seed: bytes,
     iters: int,
     progress_callback: Callable[[int], None] | None = None,
-) -> str:
-    h = sha256(seed.encode()).digest()
+) -> bytes:
+    h = sha256(seed).digest()
 
     for i in range(iters):
         h = sha256(h).digest()
@@ -57,22 +57,22 @@ def generate_by_iters(
 
 
 def encrypt(
-    keyseed: str,
+    keyseed: bytes,
     delta: timedelta,
-    message: str,
+    message: bytes,
     progress_callback: Callable[[int], None] | None = None,
-) -> tuple[str, int, str]:
+) -> tuple[bytes, int, bytes]:
     key, iterations = generate_by_time(keyseed, delta, progress_callback)
-    encrypted = Fernet(key).encrypt(message.encode())
+    encrypted = Fernet(key).encrypt(message)
     return key, iterations, encrypted
 
 
 def decrypt(
-    keyseed: str,
+    keyseed: bytes,
     iterations: int,
-    encrypted: str,
+    encrypted: bytes,
     progress_callback: Callable[[int], None] | None = None,
-) -> tuple[str, str]:
+) -> tuple[bytes, bytes]:
     key = generate_by_iters(keyseed, iterations, progress_callback)
     decrypted = Fernet(key).decrypt(encrypted)
     return key, decrypted
