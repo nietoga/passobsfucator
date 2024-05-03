@@ -21,6 +21,8 @@ def generate_password(length: int = 10) -> None:
 def encrypt(seed: str, time: int, value: str) -> None:
     """
     Encrypt a value with the intention to decrypt it later spending X amount of time.
+    Keep in mind it takes X time to encrypt it and it might take a little more or a little less time to decrypt it.
+    That will depend on processor's capacity and laptop usage during decyrpt.
     """
     delta = timedelta(seconds=time)
     progress_bar = ProgressBar()
