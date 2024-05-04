@@ -2,9 +2,9 @@
 
 A tool to encrypt plain text data with a time lock. I created it to obsfucate my LoL password, in order to avoid playing it without necessarily losing access to my account or e-mail.
 
-# Example
+# How to use it
 
-Here's an example of how to use it:
+Here are some examples of how to use it.
 
 ## Generate password
 
@@ -27,7 +27,7 @@ Keep in mind:
 python main.py decrypt encrypted.txt --output-file decrypted.txt
 ```
 
-## How to use it
+## A quick demo
 
 ```bash
 # Generate password and store in a file
