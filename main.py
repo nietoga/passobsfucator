@@ -1,91 +1,107 @@
-from datetime import timedelta
-from progress import ProgressBar
-from datetime import datetime
-import json
+"""CLI entry-point for the time-lock password obfuscation tool."""
 
-import randpass
-import puzzle
+import json
+from datetime import timedelta
+from pathlib import Path
+from typing import Annotated, Optional
+
 import typer
 
-app = typer.Typer(help="Password obsfucation utility.")
+import puzzle
+import randpass
+from progress import ProgressBar
+
+app = typer.Typer(help="Password obfuscation utility using time-lock encryption.")
 
 
 @app.command()
-def generate_password(length: int = 10) -> None:
-    """
-    Generate a random password with a given length.
-    """
-    password = randpass.generate(length)
-    print(password)
+def generate_password(
+    length: Annotated[int, typer.Option(help="Password length (minimum 4).")] = 10,
+) -> None:
+    """Generate a cryptographically secure random password."""
+    try:
+        password = randpass.generate(length)
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(password)
 
 
 @app.command()
 def encrypt(
-    value: str,
-    time_in_seconds: int = 3600,
-    seed: str = randpass.generate(10),
-    output_file: str = "",
+    value: Annotated[str, typer.Argument(help="Plaintext value to encrypt.")],
+    time_in_seconds: Annotated[
+        int, typer.Option(help="CPU seconds required to decrypt.")
+    ] = 3600,
+    seed: Annotated[
+        Optional[str],
+        typer.Option(help="Custom seed (generated randomly when omitted)."),
+    ] = None,
+    output_file: Annotated[
+        Optional[Path],
+        typer.Option(help="Write JSON output here instead of stdout."),
+    ] = None,
 ) -> None:
-    """
-    Encrypt a value with the intention to decrypt it later spending X amount of time.
-    Keep in mind it takes X time to encrypt it and it might take a little more or a little less time to decrypt it.
-    That will depend on processor's capacity and laptop usage during decyrpt.
-    """
-    delta = timedelta(seconds=time_in_seconds)
-    progress_bar = ProgressBar()
-    _, iters, encrypted = puzzle.encrypt(
-        seed.encode(), delta, value.encode(), progress_bar.set_progress
-    )
-    progress_bar.close()
+    """Encrypt VALUE so that decryption requires ~TIME_IN_SECONDS of CPU time.
 
-    output_dict = {
-        "seed": seed,
+    Both encryption and decryption consume approximately the same amount of time.
+    The exact decryption time may vary slightly depending on the machine's speed.
+    """
+    chosen_seed = seed or randpass.generate(10)
+    delta = timedelta(seconds=time_in_seconds)
+
+    with ProgressBar() as progress_bar:
+        _, iters, encrypted = puzzle.encrypt(
+            chosen_seed.encode(), delta, value.encode(), progress_bar.set_progress
+        )
+
+    output = {
+        "seed": chosen_seed,
         "iters": iters,
         "encrypted": encrypted.decode(),
     }
 
-    if not output_file:
-        print(json.dumps(output_dict, indent=4))
+    if output_file is None:
+        typer.echo(json.dumps(output, indent=4))
     else:
-        with open(output_file, "w") as output_file:
-            json.dump(output_dict, output_file, indent=4)
+        output_file.write_text(json.dumps(output, indent=4))
 
 
 @app.command()
 def decrypt(
-    input_file: str,
-    output_file: str = "",
+    input_file: Annotated[
+        Path, typer.Argument(help="JSON file produced by the encrypt command.")
+    ],
+    output_file: Annotated[
+        Optional[Path],
+        typer.Option(help="Write JSON output here instead of stdout."),
+    ] = None,
 ) -> None:
-    """
-    Decrypt a value encrypted with the encrypt command.
-    """
-    with open(input_file, "r") as input_file:
-        input_dict = json.load(input_file)
-        seed: str = input_dict["seed"]
-        iters: int = input_dict["iters"]
-        value: str = input_dict["encrypted"]
+    """Decrypt a value previously encrypted with the encrypt command."""
+    try:
+        payload = json.loads(input_file.read_text())
+    except (FileNotFoundError, json.JSONDecodeError) as exc:
+        typer.echo(f"Error reading {input_file}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
-    start = datetime.now()
-    progress_bar = ProgressBar()
-    _, decrypted = puzzle.decrypt(
-        seed.encode(), iters, value.encode(), progress_bar.set_progress
-    )
-    progress_bar.close()
-    end = datetime.now()
+    seed: str = payload["seed"]
+    iters: int = payload["iters"]
+    encrypted: str = payload["encrypted"]
 
-    time_spent_in_seconds = int((end - start).total_seconds())
+    with ProgressBar() as progress_bar:
+        _, decrypted = puzzle.decrypt(
+            seed.encode(), iters, encrypted.encode(), progress_bar.set_progress
+        )
 
-    output_dict = {
+    output = {
         "seed": seed,
-        "time_in_seconds": time_spent_in_seconds,
         "decrypted": decrypted.decode(),
     }
 
-    if not output_file:
-        print(json.dumps(output_dict, indent=4))
+    if output_file is None:
+        typer.echo(json.dumps(output, indent=4))
     else:
-        with open(output_file, "w") as output_file:
-            json.dump(output_dict, output_file, indent=4)
+        output_file.write_text(json.dumps(output, indent=4))
 
 
 if __name__ == "__main__":

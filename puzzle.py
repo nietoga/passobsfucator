@@ -1,11 +1,28 @@
-# From: https://asecuritysite.com/encryption/pow
+"""Time-lock puzzle via sequential SHA-256 proof-of-work.
+
+Reference: https://asecuritysite.com/encryption/pow
+"""
 
 import base64
-from typing import Callable
-from cryptography.fernet import Fernet
 from datetime import timedelta
-from time import time
 from hashlib import sha256
+from time import monotonic
+from typing import Callable
+
+from cryptography.fernet import Fernet
+
+# How often to sample wall-clock time and fire progress callbacks in the
+# tight hashing loop. Checking time() every iteration is measurably slow;
+# checking every TICK_INTERVAL iterations keeps overhead negligible.
+_TICK_INTERVAL = 5_000
+
+
+def _hash_chain(seed: bytes, count: int) -> bytes:
+    """Run *count* sequential SHA-256 hashes starting from *seed*."""
+    h = sha256(seed).digest()
+    for _ in range(count):
+        h = sha256(h).digest()
+    return h
 
 
 def generate_by_time(
@@ -13,22 +30,39 @@ def generate_by_time(
     delta: timedelta,
     progress_callback: Callable[[int], None] | None = None,
 ) -> tuple[bytes, int]:
-    start = time()
-    end = start + delta.total_seconds()
+    """Hash *seed* repeatedly for *delta* seconds and return the key + iteration count.
+
+    Args:
+        seed: Starting bytes for the hash chain.
+        delta: How long to run the hashing loop.
+        progress_callback: Optional callable receiving progress in [0, 100].
+
+    Returns:
+        A tuple of (url-safe base-64 key, number of iterations performed).
+    """
+    duration = delta.total_seconds()
+    start = monotonic()
+    end = start + duration
 
     h = sha256(seed).digest()
     iters = 0
+    last_progress = -1
 
-    current = start
-    while current < end:
-        h = sha256(h).digest()
+    while True:
+        # Run a batch of iterations before checking the clock.
+        for _ in range(_TICK_INTERVAL):
+            h = sha256(h).digest()
+        iters += _TICK_INTERVAL
+
+        now = monotonic()
+        if now >= end:
+            break
 
         if progress_callback:
-            progress = int((current - start) * 100 / (end - start))
-            progress_callback(min(progress, 100))
-
-        current = time()
-        iters += 1
+            progress = min(int((now - start) * 100 / duration), 99)
+            if progress != last_progress:
+                last_progress = progress
+                progress_callback(progress)
 
     if progress_callback:
         progress_callback(100)
@@ -41,14 +75,29 @@ def generate_by_iters(
     iters: int,
     progress_callback: Callable[[int], None] | None = None,
 ) -> bytes:
-    h = sha256(seed).digest()
+    """Reproduce a hash-chain key by running exactly *iters* hashes.
 
-    for i in range(iters):
-        h = sha256(h).digest()
+    Args:
+        seed: Starting bytes for the hash chain.
+        iters: Number of sequential SHA-256 rounds to perform.
+        progress_callback: Optional callable receiving progress in [0, 100].
+
+    Returns:
+        The url-safe base-64 encoded final hash (Fernet-compatible key).
+    """
+    h = sha256(seed).digest()
+    last_progress = -1
+
+    for i in range(0, iters, _TICK_INTERVAL):
+        batch = min(_TICK_INTERVAL, iters - i)
+        for _ in range(batch):
+            h = sha256(h).digest()
 
         if progress_callback:
-            progress = int((i + 1) * 100 / iters)
-            progress_callback(progress)
+            progress = min(int((i + batch) * 100 / iters), 100)
+            if progress != last_progress:
+                last_progress = progress
+                progress_callback(progress)
 
     if progress_callback:
         progress_callback(100)
@@ -62,6 +111,17 @@ def encrypt(
     message: bytes,
     progress_callback: Callable[[int], None] | None = None,
 ) -> tuple[bytes, int, bytes]:
+    """Time-lock encrypt *message* using a hash-chain key derived from *keyseed*.
+
+    Args:
+        keyseed: Seed bytes used to derive the Fernet key.
+        delta: CPU time budget for key derivation (same budget required to decrypt).
+        message: Plaintext bytes to encrypt.
+        progress_callback: Optional callable receiving progress in [0, 100].
+
+    Returns:
+        A tuple of (derived key, iteration count, Fernet ciphertext).
+    """
     key, iterations = generate_by_time(keyseed, delta, progress_callback)
     encrypted = Fernet(key).encrypt(message)
     return key, iterations, encrypted
@@ -73,6 +133,17 @@ def decrypt(
     encrypted: bytes,
     progress_callback: Callable[[int], None] | None = None,
 ) -> tuple[bytes, bytes]:
+    """Reproduce the hash-chain key and decrypt *encrypted*.
+
+    Args:
+        keyseed: Same seed used during encryption.
+        iterations: Iteration count returned by :func:`encrypt`.
+        encrypted: Fernet ciphertext produced by :func:`encrypt`.
+        progress_callback: Optional callable receiving progress in [0, 100].
+
+    Returns:
+        A tuple of (derived key, plaintext bytes).
+    """
     key = generate_by_iters(keyseed, iterations, progress_callback)
     decrypted = Fernet(key).decrypt(encrypted)
     return key, decrypted

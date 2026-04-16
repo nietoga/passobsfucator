@@ -1,43 +1,52 @@
-# Time-Lock Encryption Tool
+# passobfuscator
 
-A Python CLI tool that obfuscates sensitive information (like passwords) by requiring a specific amount of computational time to decrypt it.
-
-## Purpose
-
-The tool uses a Proof-of-Work (PoW) mechanism based on SHA-256 hashing to time-lock encrypted data. The primary use case is preventing impulsive access to accounts (e.g., gaming accounts) by requiring a forced waiting period equal to the original encryption time.
+A Python CLI tool that time-lock encrypts sensitive values (like passwords) by requiring a configurable amount of CPU work to decrypt.
 
 ## Project Structure
 
 ```
 .
-├── main.py        # CLI entry point (generate-password, encrypt, decrypt commands)
-├── puzzle.py      # Core time-lock puzzle logic (PoW via SHA-256 hashing)
-├── randpass.py    # Random password generation utility
-├── progress.py    # tqdm progress bar wrapper
-├── requirements.txt
+├── main.py          # CLI entry point (typer): generate-password, encrypt, decrypt
+├── puzzle.py        # Hash-chain key derivation + Fernet encrypt/decrypt
+├── randpass.py      # Cryptographically secure password generator (secrets module)
+├── progress.py      # tqdm progress-bar helper with context manager support
+├── tests/           # pytest test suite (35 tests)
+├── pyproject.toml   # Project metadata, dependencies, tool config (uv/pip)
+├── uv.lock          # Reproducible lock file
 └── README.md
 ```
 
 ## Technologies
 
 - **Language**: Python 3.12
-- **CLI**: typer
-- **Cryptography**: cryptography (Fernet), hashlib (SHA-256)
+- **Package management**: uv (pyproject.toml + uv.lock)
+- **CLI**: typer ≥ 0.12.0
+- **Cryptography**: cryptography library (Fernet), hashlib SHA-256
 - **Progress**: tqdm
+- **Testing**: pytest + pytest-cov
 
-## Usage
+## Running
 
 ```bash
-# Generate a random password
-python main.py generate-password
+python main.py --help
+python main.py generate-password --length 16
+python main.py encrypt 'secret' --time-in-seconds 10 --output-file locked.json
+python main.py decrypt locked.json
+```
 
-# Encrypt a value (default: 1 hour decryption time)
-python main.py encrypt "mypassword" --time-in-seconds 10
+## Testing
 
-# Decrypt from a file
-python main.py decrypt output.json
+```bash
+python -m pytest tests/ -v
 ```
 
 ## Workflow
 
-The app runs as a console CLI tool. The "Start application" workflow shows the help screen.
+"Start application" runs `python main.py --help` as a console workflow.
+
+## Key Design Decisions
+
+- `randpass.py` uses `secrets` (not `random`) for cryptographic security.
+- `puzzle.py` batches SHA-256 iterations in groups of 5,000 before checking the clock, keeping progress-callback overhead negligible.
+- `main.py` uses `None` as the seed default (not a function call evaluated at import time) to ensure each invocation gets a fresh seed.
+- `progress.py` implements the context manager protocol so callers can use `with ProgressBar() as pb:`.
