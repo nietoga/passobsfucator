@@ -2,16 +2,35 @@
 
 import json
 from datetime import timedelta
+from enum import Enum
 from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
 
 import puzzle
+import puzzle_argon2
 import randpass
 from progress import ProgressBar
 
 app = typer.Typer(help="Password obfuscation utility using time-lock encryption.")
+
+# Algorithm identifier written into / read from the JSON payload.
+# Old files without this field are treated as sha256 for backward compatibility.
+_ALGORITHM_KEY = "algorithm"
+_DEFAULT_ALGORITHM = "sha256"
+
+
+class Algorithm(str, Enum):
+    """Supported time-lock algorithms."""
+
+    sha256 = "sha256"
+    argon2 = "argon2"
+
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
 
 
 @app.command()
@@ -33,9 +52,22 @@ def encrypt(
     time_in_seconds: Annotated[
         int, typer.Option(help="CPU seconds required to decrypt.")
     ] = 3600,
+    algorithm: Annotated[
+        Algorithm,
+        typer.Option(
+            help=(
+                "Key-derivation algorithm.  "
+                "sha256: sequential SHA-256 chain (fast, not ASIC-resistant).  "
+                "argon2: Argon2id memory-hard KDF (resistant to GPU/ASIC attacks)."
+            ),
+            case_sensitive=False,
+        ),
+    ] = Algorithm.sha256,
     seed: Annotated[
         Optional[str],
-        typer.Option(help="Custom seed (generated randomly when omitted)."),
+        typer.Option(
+            help="[sha256 only] Custom seed (generated randomly when omitted)."
+        ),
     ] = None,
     output_file: Annotated[
         Optional[Path],
@@ -45,26 +77,14 @@ def encrypt(
     """Encrypt VALUE so that decryption requires ~TIME_IN_SECONDS of CPU time.
 
     Both encryption and decryption consume approximately the same amount of time.
-    The exact decryption time may vary slightly depending on the machine's speed.
+    Choose --algorithm argon2 for resistance against GPU and ASIC acceleration.
     """
-    chosen_seed = seed or randpass.generate(10)
-    delta = timedelta(seconds=time_in_seconds)
-
-    with ProgressBar() as progress_bar:
-        _, iters, encrypted = puzzle.encrypt(
-            chosen_seed.encode(), delta, value.encode(), progress_bar.set_progress
-        )
-
-    output = {
-        "seed": chosen_seed,
-        "iters": iters,
-        "encrypted": encrypted.decode(),
-    }
-
-    if output_file is None:
-        typer.echo(json.dumps(output, indent=4))
+    if algorithm is Algorithm.sha256:
+        output = _encrypt_sha256(value, time_in_seconds, seed)
     else:
-        output_file.write_text(json.dumps(output, indent=4))
+        output = _encrypt_argon2(value, time_in_seconds)
+
+    _write_output(output, output_file)
 
 
 @app.command()
@@ -77,31 +97,128 @@ def decrypt(
         typer.Option(help="Write JSON output here instead of stdout."),
     ] = None,
 ) -> None:
-    """Decrypt a value previously encrypted with the encrypt command."""
+    """Decrypt a value previously encrypted with the encrypt command.
+
+    The algorithm is detected automatically from the input file.
+    """
     try:
         payload = json.loads(input_file.read_text())
     except (FileNotFoundError, json.JSONDecodeError) as exc:
         typer.echo(f"Error reading {input_file}: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
+    detected = payload.get(_ALGORITHM_KEY, _DEFAULT_ALGORITHM)
+
+    if detected == Algorithm.sha256:
+        output = _decrypt_sha256(payload)
+    elif detected == Algorithm.argon2:
+        output = _decrypt_argon2(payload)
+    else:
+        typer.echo(f"Error: unknown algorithm '{detected}' in {input_file}", err=True)
+        raise typer.Exit(code=1)
+
+    _write_output(output, output_file)
+
+
+# ---------------------------------------------------------------------------
+# SHA-256 chain helpers
+# ---------------------------------------------------------------------------
+
+
+def _encrypt_sha256(value: str, time_in_seconds: int, seed: Optional[str]) -> dict:
+    chosen_seed = seed or randpass.generate(10)
+    delta = timedelta(seconds=time_in_seconds)
+
+    with ProgressBar() as pb:
+        _, iters, encrypted = puzzle.encrypt(
+            chosen_seed.encode(), delta, value.encode(), pb.set_progress
+        )
+
+    return {
+        _ALGORITHM_KEY: Algorithm.sha256,
+        "seed": chosen_seed,
+        "iters": iters,
+        "encrypted": encrypted.decode(),
+    }
+
+
+def _decrypt_sha256(payload: dict) -> dict:
     seed: str = payload["seed"]
     iters: int = payload["iters"]
     encrypted: str = payload["encrypted"]
 
-    with ProgressBar() as progress_bar:
+    with ProgressBar() as pb:
         _, decrypted = puzzle.decrypt(
-            seed.encode(), iters, encrypted.encode(), progress_bar.set_progress
+            seed.encode(), iters, encrypted.encode(), pb.set_progress
         )
 
-    output = {
-        "seed": seed,
-        "decrypted": decrypted.decode(),
+    return {"algorithm": Algorithm.sha256, "seed": seed, "decrypted": decrypted.decode()}
+
+
+# ---------------------------------------------------------------------------
+# Argon2id helpers
+# ---------------------------------------------------------------------------
+
+
+def _encrypt_argon2(value: str, time_in_seconds: int) -> dict:
+    typer.echo(
+        f"Calibrating Argon2id parameters for ~{time_in_seconds}s on this machine…",
+        err=True,
+    )
+    salt, time_cost, memory_cost_kb, parallelism, ciphertext = puzzle_argon2.encrypt(
+        target_seconds=float(time_in_seconds),
+        message=value.encode(),
+    )
+    typer.echo(
+        f"Using time_cost={time_cost}, memory={memory_cost_kb // 1024} MiB. "
+        "Deriving key…",
+        err=True,
+    )
+
+    return {
+        _ALGORITHM_KEY: Algorithm.argon2,
+        "salt": salt.hex(),
+        "time_cost": time_cost,
+        "memory_cost_kb": memory_cost_kb,
+        "parallelism": parallelism,
+        "encrypted": ciphertext.decode(),
     }
 
+
+def _decrypt_argon2(payload: dict) -> dict:
+    salt = bytes.fromhex(payload["salt"])
+    time_cost: int = payload["time_cost"]
+    memory_cost_kb: int = payload.get("memory_cost_kb", puzzle_argon2.DEFAULT_MEMORY_COST_KB)
+    parallelism: int = payload.get("parallelism", puzzle_argon2.DEFAULT_PARALLELISM)
+    ciphertext: str = payload["encrypted"]
+
+    typer.echo(
+        f"Deriving Argon2id key (time_cost={time_cost}, "
+        f"memory={memory_cost_kb // 1024} MiB)…",
+        err=True,
+    )
+    decrypted = puzzle_argon2.decrypt(
+        salt=salt,
+        time_cost=time_cost,
+        ciphertext=ciphertext.encode(),
+        memory_cost_kb=memory_cost_kb,
+        parallelism=parallelism,
+    )
+
+    return {"algorithm": Algorithm.argon2, "decrypted": decrypted.decode()}
+
+
+# ---------------------------------------------------------------------------
+# Shared output helper
+# ---------------------------------------------------------------------------
+
+
+def _write_output(data: dict, output_file: Optional[Path]) -> None:
+    text = json.dumps(data, indent=4)
     if output_file is None:
-        typer.echo(json.dumps(output, indent=4))
+        typer.echo(text)
     else:
-        output_file.write_text(json.dumps(output, indent=4))
+        output_file.write_text(text)
 
 
 if __name__ == "__main__":
