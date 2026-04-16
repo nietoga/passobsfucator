@@ -161,19 +161,15 @@ def _decrypt_sha256(payload: dict) -> dict:
 
 
 def _encrypt_argon2(value: str, time_in_seconds: int) -> dict:
-    typer.echo(
-        f"Calibrating Argon2id parameters for ~{time_in_seconds}s on this machine…",
-        err=True,
-    )
-    salt, time_cost, memory_cost_kb, parallelism, ciphertext = puzzle_argon2.encrypt(
-        target_seconds=float(time_in_seconds),
-        message=value.encode(),
-    )
-    typer.echo(
-        f"Using time_cost={time_cost}, memory={memory_cost_kb // 1024} MiB. "
-        "Deriving key…",
-        err=True,
-    )
+    typer.echo("Calibrating Argon2id parameters…", err=True)
+    with ProgressBar() as pb:
+        salt, time_cost, memory_cost_kb, parallelism, estimated_seconds, ciphertext = (
+            puzzle_argon2.encrypt(
+                target_seconds=float(time_in_seconds),
+                message=value.encode(),
+                progress_callback=pb.set_progress,
+            )
+        )
 
     return {
         _ALGORITHM_KEY: Algorithm.argon2,
@@ -181,6 +177,7 @@ def _encrypt_argon2(value: str, time_in_seconds: int) -> dict:
         "time_cost": time_cost,
         "memory_cost_kb": memory_cost_kb,
         "parallelism": parallelism,
+        "estimated_seconds": round(estimated_seconds, 2),
         "encrypted": ciphertext.decode(),
     }
 
@@ -190,20 +187,19 @@ def _decrypt_argon2(payload: dict) -> dict:
     time_cost: int = payload["time_cost"]
     memory_cost_kb: int = payload.get("memory_cost_kb", puzzle_argon2.DEFAULT_MEMORY_COST_KB)
     parallelism: int = payload.get("parallelism", puzzle_argon2.DEFAULT_PARALLELISM)
+    estimated_seconds: float | None = payload.get("estimated_seconds")
     ciphertext: str = payload["encrypted"]
 
-    typer.echo(
-        f"Deriving Argon2id key (time_cost={time_cost}, "
-        f"memory={memory_cost_kb // 1024} MiB)…",
-        err=True,
-    )
-    decrypted = puzzle_argon2.decrypt(
-        salt=salt,
-        time_cost=time_cost,
-        ciphertext=ciphertext.encode(),
-        memory_cost_kb=memory_cost_kb,
-        parallelism=parallelism,
-    )
+    with ProgressBar() as pb:
+        decrypted = puzzle_argon2.decrypt(
+            salt=salt,
+            time_cost=time_cost,
+            ciphertext=ciphertext.encode(),
+            memory_cost_kb=memory_cost_kb,
+            parallelism=parallelism,
+            expected_seconds=estimated_seconds,
+            progress_callback=pb.set_progress,
+        )
 
     return {"algorithm": Algorithm.argon2, "decrypted": decrypted.decode()}
 

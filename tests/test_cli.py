@@ -73,8 +73,7 @@ class TestEncryptSha256Command:
             ["encrypt", "mypassword", "--time-in-seconds", "1", "--seed", "myseed"],
         )
         assert result.exit_code == 0
-        data = _extract_json(result.output)
-        assert data["seed"] == "myseed"
+        assert _extract_json(result.output)["seed"] == "myseed"
 
     def test_iters_is_positive(self) -> None:
         result = runner.invoke(app, ["encrypt", "x", "--time-in-seconds", "1"])
@@ -138,7 +137,16 @@ class TestEncryptArgon2Command:
         assert "time_cost" in data
         assert "memory_cost_kb" in data
         assert "parallelism" in data
+        assert "estimated_seconds" in data
         assert "encrypted" in data
+
+    def test_estimated_seconds_is_positive(self) -> None:
+        result = runner.invoke(
+            app,
+            ["encrypt", "x", "--time-in-seconds", "1", "--algorithm", "argon2"],
+        )
+        assert result.exit_code == 0
+        assert _extract_json(result.output)["estimated_seconds"] > 0
 
     def test_output_file(self, tmp_path: Path) -> None:
         out = tmp_path / "enc.json"
@@ -185,12 +193,29 @@ class TestDecryptArgon2Command:
         assert result.exit_code == 0
         assert _extract_json(result.output)["decrypted"] == "hello-argon2"
 
+    def test_round_trip_with_progress(self, tmp_path: Path) -> None:
+        """Decrypt should show a progress bar (estimated_seconds present in file)."""
+        enc_file = self._encrypt_to_file(tmp_path, "progress-test")
+        result = runner.invoke(app, ["decrypt", str(enc_file)])
+        assert result.exit_code == 0
+
     def test_round_trip_output_file(self, tmp_path: Path) -> None:
         enc_file = self._encrypt_to_file(tmp_path, "hello-argon2")
         dec_file = tmp_path / "dec.json"
         result = runner.invoke(app, ["decrypt", str(enc_file), "--output-file", str(dec_file)])
         assert result.exit_code == 0
         assert json.loads(dec_file.read_text())["decrypted"] == "hello-argon2"
+
+    def test_round_trip_without_estimated_seconds(self, tmp_path: Path) -> None:
+        """Old Argon2 files without estimated_seconds should still decrypt fine."""
+        enc_file = self._encrypt_to_file(tmp_path, "no-estimate")
+        payload = json.loads(enc_file.read_text())
+        payload.pop("estimated_seconds", None)
+        enc_file.write_text(json.dumps(payload))
+
+        result = runner.invoke(app, ["decrypt", str(enc_file)])
+        assert result.exit_code == 0
+        assert _extract_json(result.output)["decrypted"] == "no-estimate"
 
     def test_unknown_algorithm_in_file_exits_with_error(self, tmp_path: Path) -> None:
         enc_file = tmp_path / "bad.json"
