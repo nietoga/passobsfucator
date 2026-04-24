@@ -70,6 +70,80 @@ class TestGenerateByTime:
         assert progress_values[-1] == 100
 
 
+class TestStrategyFactory:
+    def test_build_sha256_strategy(self) -> None:
+        strategy = puzzle.build_strategy(puzzle.ALGORITHM_SHA256)
+        assert strategy.name == puzzle.ALGORITHM_SHA256
+
+    def test_build_legacy_sha256_chain_alias(self) -> None:
+        strategy = puzzle.build_strategy(puzzle.ALGORITHM_SHA256_CHAIN)
+        assert strategy.name == puzzle.ALGORITHM_SHA256
+
+    def test_build_scrypt_strategy(self) -> None:
+        strategy = puzzle.build_strategy(
+            puzzle.ALGORITHM_SCRYPT,
+            scrypt_n=2**10,
+            scrypt_r=8,
+            scrypt_p=1,
+        )
+        assert strategy.name == puzzle.ALGORITHM_SCRYPT
+
+    def test_build_unknown_strategy_raises(self) -> None:
+        with pytest.raises(ValueError, match="Unsupported algorithm"):
+            puzzle.build_strategy("unknown")
+
+
+class TestStrategyEncryptDecrypt:
+    def test_sha256_strategy_round_trip(self) -> None:
+        strategy = puzzle.build_strategy(puzzle.ALGORITHM_SHA256)
+        _, work_units, ciphertext, _ = puzzle.encrypt_with_strategy(
+            SEED, timedelta(seconds=0.1), MESSAGE, strategy=strategy
+        )
+        _, decrypted = puzzle.decrypt_with_strategy(SEED, work_units, ciphertext, strategy)
+        assert decrypted == MESSAGE
+
+    def test_scrypt_strategy_time_lock_round_trip(self) -> None:
+        strategy = puzzle.build_strategy(
+            puzzle.ALGORITHM_SCRYPT,
+            scrypt_n=2**10,
+            scrypt_r=8,
+            scrypt_p=1,
+            scrypt_salt=b"0123456789abcdef",
+        )
+        _, work_units, ciphertext, payload = puzzle.encrypt_with_strategy(
+            SEED, timedelta(seconds=0.1), MESSAGE, strategy=strategy
+        )
+        assert work_units > 0
+        assert payload["scrypt"]["salt"]
+        replay_strategy = puzzle.build_strategy(
+            puzzle.ALGORITHM_SCRYPT,
+            scrypt_n=2**10,
+            scrypt_r=8,
+            scrypt_p=1,
+            scrypt_salt=b"0123456789abcdef",
+        )
+        _, decrypted = puzzle.decrypt_with_strategy(
+            SEED, work_units, ciphertext, replay_strategy
+        )
+        assert decrypted == MESSAGE
+
+    def test_scrypt_strategy_emits_progress(self) -> None:
+        progress_values: list[int] = []
+        strategy = puzzle.build_strategy(
+            puzzle.ALGORITHM_SCRYPT,
+            scrypt_n=2**10,
+            scrypt_r=8,
+            scrypt_p=1,
+            scrypt_salt=b"0123456789abcdef",
+        )
+        _, work_units = strategy.derive_by_time(
+            SEED, timedelta(seconds=0.1), progress_callback=progress_values.append
+        )
+        assert work_units > 0
+        assert progress_values[0] == 0
+        assert progress_values[-1] == 100
+
+
 class TestEncryptDecrypt:
     def test_round_trip(self) -> None:
         _, iters, ciphertext = puzzle.encrypt(SEED, timedelta(seconds=0.1), MESSAGE)
@@ -97,3 +171,48 @@ class TestEncryptDecrypt:
         assert isinstance(key, bytes)
         assert isinstance(iters, int)
         assert isinstance(ciphertext, bytes)
+
+
+class TestScrypt:
+    def test_scrypt_strategy_derives_valid_fernet_key(self) -> None:
+        strategy = puzzle.ScryptStrategy(
+            n=2**10,
+            r=8,
+            p=1,
+            salt=b"0123456789abcdef",
+        )
+        key = strategy.derive_by_work(b"scrypt-seed", work_units=2)
+        decoded = base64.urlsafe_b64decode(key)
+        assert len(decoded) == 32
+
+    def test_scrypt_strategy_is_deterministic_with_same_inputs(self) -> None:
+        strategy = puzzle.ScryptStrategy(
+            n=2**10,
+            r=8,
+            p=1,
+            salt=b"0123456789abcdef",
+        )
+        key1 = strategy.derive_by_work(b"seed", work_units=3)
+        key2 = strategy.derive_by_work(b"seed", work_units=3)
+        assert key1 == key2
+
+    def test_scrypt_strategy_key_changes_when_salt_changes(self) -> None:
+        strategy1 = puzzle.ScryptStrategy(
+            n=2**10,
+            r=8,
+            p=1,
+            salt=b"salt-000000000001",
+        )
+        strategy2 = puzzle.ScryptStrategy(
+            n=2**10,
+            r=8,
+            p=1,
+            salt=b"salt-000000000002",
+        )
+        key1 = strategy1.derive_by_work(b"seed", work_units=2)
+        key2 = strategy2.derive_by_work(b"seed", work_units=2)
+        assert key1 != key2
+
+    def test_scrypt_strategy_invalid_n_raises(self) -> None:
+        with pytest.raises(ValueError, match="power of two"):
+            puzzle.ScryptStrategy(n=1000, r=8, p=1, salt=b"0123456789abcdef")

@@ -24,7 +24,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "python main.py --help"
+args = "uv run python main.py --help"
 
 [workflows.workflow.metadata]
 outputType = "console"

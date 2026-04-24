@@ -1,26 +1,32 @@
 # passobfuscator
 
-Encrypt plain text with a time-lock so that decryption requires a configurable
-amount of CPU time. The original motivation was to keep a gaming account password
-inaccessible during self-imposed breaks — without fully losing access.
+Encrypt plaintext with a key-derivation puzzle so decryption takes deliberate
+work. The tool supports both:
+
+- `sha256`: sequential time-lock hashing (CPU-bound)
+- `scrypt`: memory-hard KDF (more resistant to GPU/ASIC acceleration)
 
 ## How it works
 
-During encryption the tool runs a sequential SHA-256 hash chain for the
-requested number of seconds and counts the iterations it managed to complete.
-The final hash is used as a [Fernet](https://cryptography.io/en/latest/fernet/)
-symmetric key to encrypt the plaintext. The iteration count is stored alongside
-the ciphertext.
+### 1) `sha256` (time-lock mode)
 
-Decryption replays _exactly_ the same number of hash rounds (starting from the
-same seed) to reconstruct the key. Because each round depends on the previous
-one, the work cannot be parallelised — decryption therefore takes approximately
-the same wall-clock time as encryption did on the same hardware.
+Encryption runs a sequential SHA-256 chain for the requested wall-clock
+duration and stores the resulting `work_units`. Decryption reproduces exactly
+that many rounds to rebuild the key.
+
+### 2) `scrypt` (memory-hard time-lock mode)
+
+Encryption repeatedly applies `scrypt(seed, salt, n, r, p)` for the requested
+time budget and stores `work_units` plus the scrypt parameters/salt in output
+JSON. Decryption replays exactly the same number of sequential rounds.
+
+Both modes then use a [Fernet](https://cryptography.io/en/latest/fernet/) key
+to encrypt/decrypt payload data.
 
 ## Requirements
 
-- Python ≥ 3.11
-- [uv](https://docs.astral.sh/uv/) (recommended) **or** pip
+- Python >= 3.11
+- [uv](https://docs.astral.sh/uv/) (required workflow for this repo)
 
 ## Installation
 
@@ -29,76 +35,96 @@ the same wall-clock time as encryption did on the same hardware.
 git clone https://github.com/nietoga/passobsfucator.git
 cd passobsfucator
 
-# Install with uv (creates an isolated virtual environment automatically)
+# Install dependencies from pyproject.toml/uv.lock
 uv sync
-
-# Or with pip
-pip install .
 ```
 
-## Usage
+## Usage (always via uv)
 
 ### Generate a random password
 
 ```bash
-python main.py generate-password --length 16
-# or via uv:
 uv run python main.py generate-password --length 16
 ```
 
-### Encrypt a value
+### Encrypt with default time-lock (`sha256`)
 
 ```bash
-# Default: 1 hour of decryption time
-python main.py encrypt 'MyS3cr3t!' --time-in-seconds 3600 --output-file encrypted.json
-
-# Quick demo (10-second lock)
-python main.py encrypt 'MyS3cr3t!' --time-in-seconds 10 --output-file encrypted.json
+uv run python main.py encrypt 'MyS3cr3t!' --time-in-seconds 10 --output-file locked.json
 ```
 
-> **Note**: encryption takes the same amount of CPU time as decryption will.
-
-### Decrypt a value
+### Encrypt with memory-hard `scrypt`
 
 ```bash
-python main.py decrypt encrypted.json
+uv run python main.py encrypt 'MyS3cr3t!' \
+  --algorithm scrypt \
+  --time-in-seconds 10 \
+  --scrypt-n 16384 \
+  --scrypt-r 8 \
+  --scrypt-p 1 \
+  --output-file locked-scrypt.json
 ```
 
-### End-to-end demo
+### Decrypt
 
 ```bash
-# 1. Generate a password and encrypt it with a 10-second lock
-python main.py generate-password --length 16 > raw.txt
-python main.py encrypt "$(cat raw.txt)" --time-in-seconds 10 --output-file locked.json
-rm raw.txt           # discard the plaintext
+uv run python main.py decrypt locked.json
+uv run python main.py decrypt locked-scrypt.json
+```
 
-# 2. (wait however long you like)
+### Show progress bar (disabled by default)
 
-# 3. Recover the password — takes ~10 s of CPU time
-python main.py decrypt locked.json
+```bash
+uv run python main.py encrypt 'MyS3cr3t!' --time-in-seconds 10 --show-progress
+uv run python main.py decrypt locked.json --show-progress
+```
+
+## Output JSON formats
+
+### `sha256`
+
+```json
+{
+  "algorithm": "sha256",
+  "seed": "example-seed",
+  "work_units": 12345000,
+  "encrypted": "..."
+}
+```
+
+### `scrypt`
+
+```json
+{
+  "algorithm": "scrypt",
+  "seed": "example-seed",
+  "work_units": 24,
+  "scrypt": {
+    "n": 16384,
+    "r": 8,
+    "p": 1,
+    "salt": "base64-url-safe-salt"
+  },
+  "encrypted": "..."
+}
 ```
 
 ## Development
 
 ```bash
-# Install all dependencies (including dev extras)
 uv sync
-
-# Run tests
-uv run pytest
-# or
-python -m pytest tests/ -v
+uv run pytest tests -v
 ```
 
 ## Project layout
 
-```
+```text
 .
-├── main.py          # CLI (typer): generate-password, encrypt, decrypt
-├── puzzle.py        # Time-lock core: hash-chain key derivation + Fernet encrypt/decrypt
+├── main.py          # CLI (Typer): generate-password, encrypt, decrypt
+├── puzzle.py        # Key-derivation + Fernet encrypt/decrypt (sha256, scrypt)
 ├── randpass.py      # Cryptographically secure password generator (secrets module)
 ├── progress.py      # tqdm progress-bar helper
-├── tests/           # pytest test suite
-├── pyproject.toml   # Project metadata & dependencies (uv / pip)
-└── uv.lock          # Reproducible dependency lock file
+├── tests/           # pytest suite
+├── pyproject.toml   # Project metadata + dependencies
+└── uv.lock          # Locked dependency set for uv
 ```
