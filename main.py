@@ -164,7 +164,10 @@ def decrypt(
 
     try:
         # Backward compatibility: old payloads used "iters", new payloads use "work_units".
-        work_units = int(payload["work_units"] if "work_units" in payload else payload["iters"])
+        raw_work_units = payload.get("work_units")
+        if raw_work_units is None:
+            raw_work_units = payload["iters"]
+        work_units = int(raw_work_units)
 
         strategy_kwargs: dict[str, int | bytes | None] = {}
         if algorithm == puzzle.ALGORITHM_SCRYPT:

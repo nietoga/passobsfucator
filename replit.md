@@ -7,7 +7,7 @@ A Python CLI tool that time-lock encrypts sensitive values (like passwords) by r
 ```
 .
 ├── main.py          # CLI entry point (typer): generate-password, encrypt, decrypt
-├── puzzle.py        # Hash-chain key derivation + Fernet encrypt/decrypt
+├── puzzle.py        # Strategy-based time-lock key derivation + Fernet encrypt/decrypt
 ├── randpass.py      # Cryptographically secure password generator (secrets module)
 ├── progress.py      # tqdm progress-bar helper with context manager support
 ├── tests/           # pytest test suite
@@ -21,7 +21,7 @@ A Python CLI tool that time-lock encrypts sensitive values (like passwords) by r
 - **Language**: Python 3.12
 - **Package management**: uv (pyproject.toml + uv.lock)
 - **CLI**: typer ≥ 0.12.0
-- **Cryptography**: cryptography library (Fernet), hashlib SHA-256, hashlib scrypt
+- **Cryptography**: cryptography library (Fernet), hashlib (SHA-256 and scrypt)
 - **Progress**: tqdm
 - **Testing**: pytest + pytest-cov
 

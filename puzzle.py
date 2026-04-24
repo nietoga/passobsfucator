@@ -116,8 +116,6 @@ class Sha256ChainStrategy(TimeLockStrategy):
         progress_callback: ProgressCallback = None,
     ) -> bytes:
         _validate_work_units(work_units)
-        if work_units < 1:
-            raise ValueError("work_units must be >= 1")
 
         h = sha256(seed).digest()
         last_progress = -1
@@ -191,8 +189,6 @@ class ScryptStrategy(TimeLockStrategy):
         progress_callback: ProgressCallback = None,
     ) -> bytes:
         _validate_work_units(work_units)
-        if work_units < 1:
-            raise ValueError("work_units must be >= 1")
 
         material = seed
         last_progress = -1

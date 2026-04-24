@@ -69,7 +69,7 @@ class TestEncryptCommand:
         data = _extract_json(result.output)
         assert data["seed"] == "myseed"
 
-    def test_iters_is_positive(self) -> None:
+    def test_work_units_is_positive(self) -> None:
         result = runner.invoke(
             app,
             ["encrypt", "x", "--time-in-seconds", "1"],
