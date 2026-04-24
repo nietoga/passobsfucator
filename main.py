@@ -45,11 +45,11 @@ def encrypt(
         str,
         typer.Option(
             help=(
-                "Key-derivation algorithm: 'sha256-chain' (time-lock) "
+                "Key-derivation algorithm: 'sha256' (time-lock) "
                 "or 'scrypt' (memory-hard, more resistant to GPU attacks)."
             )
         ),
-    ] = puzzle.ALGORITHM_SHA256_CHAIN,
+    ] = puzzle.ALGORITHM_SHA256,
     time_in_seconds: Annotated[
         int, typer.Option(help="CPU seconds required to decrypt.")
     ] = 3600,
@@ -150,7 +150,10 @@ def decrypt(
         typer.echo(f"Error reading {input_file}: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
-    algorithm = payload.get("algorithm", puzzle.ALGORITHM_SHA256_CHAIN)
+    algorithm = payload.get("algorithm", puzzle.ALGORITHM_SHA256)
+    if algorithm == puzzle.ALGORITHM_SHA256_CHAIN:
+        # Backward compatibility with older payloads.
+        algorithm = puzzle.ALGORITHM_SHA256
 
     try:
         seed: str = payload["seed"]

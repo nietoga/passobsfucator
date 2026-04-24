@@ -47,7 +47,7 @@ class TestEncryptCommand:
         data = _extract_json(result.output)
         assert "seed" in data
         assert "work_units" in data
-        assert data["algorithm"] == "sha256-chain"
+        assert data["algorithm"] == "sha256"
         assert "encrypted" in data
 
     def test_output_file(self, tmp_path: Path) -> None:

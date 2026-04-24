@@ -3,12 +3,12 @@
 Encrypt plaintext with a key-derivation puzzle so decryption takes deliberate
 work. The tool supports both:
 
-- `sha256-chain`: sequential time-lock hashing (CPU-bound)
+- `sha256`: sequential time-lock hashing (CPU-bound)
 - `scrypt`: memory-hard KDF (more resistant to GPU/ASIC acceleration)
 
 ## How it works
 
-### 1) `sha256-chain` (time-lock mode)
+### 1) `sha256` (time-lock mode)
 
 Encryption runs a sequential SHA-256 chain for the requested wall-clock
 duration and stores the resulting `work_units`. Decryption reproduces exactly
@@ -47,7 +47,7 @@ uv sync
 uv run python main.py generate-password --length 16
 ```
 
-### Encrypt with default time-lock (`sha256-chain`)
+### Encrypt with default time-lock (`sha256`)
 
 ```bash
 uv run python main.py encrypt 'MyS3cr3t!' --time-in-seconds 10 --output-file locked.json
@@ -81,11 +81,11 @@ uv run python main.py decrypt locked.json --show-progress
 
 ## Output JSON formats
 
-### `sha256-chain`
+### `sha256`
 
 ```json
 {
-  "algorithm": "sha256-chain",
+  "algorithm": "sha256",
   "seed": "example-seed",
   "work_units": 12345000,
   "encrypted": "..."
@@ -121,7 +121,7 @@ uv run pytest tests -v
 ```text
 .
 ├── main.py          # CLI (Typer): generate-password, encrypt, decrypt
-├── puzzle.py        # Key-derivation + Fernet encrypt/decrypt (sha256-chain, scrypt)
+├── puzzle.py        # Key-derivation + Fernet encrypt/decrypt (sha256, scrypt)
 ├── randpass.py      # Cryptographically secure password generator (secrets module)
 ├── progress.py      # tqdm progress-bar helper
 ├── tests/           # pytest suite

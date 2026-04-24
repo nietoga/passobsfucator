@@ -72,8 +72,12 @@ class TestGenerateByTime:
 
 class TestStrategyFactory:
     def test_build_sha256_strategy(self) -> None:
+        strategy = puzzle.build_strategy(puzzle.ALGORITHM_SHA256)
+        assert strategy.name == puzzle.ALGORITHM_SHA256
+
+    def test_build_legacy_sha256_chain_alias(self) -> None:
         strategy = puzzle.build_strategy(puzzle.ALGORITHM_SHA256_CHAIN)
-        assert strategy.name == puzzle.ALGORITHM_SHA256_CHAIN
+        assert strategy.name == puzzle.ALGORITHM_SHA256
 
     def test_build_scrypt_strategy(self) -> None:
         strategy = puzzle.build_strategy(
@@ -91,7 +95,7 @@ class TestStrategyFactory:
 
 class TestStrategyEncryptDecrypt:
     def test_sha256_strategy_round_trip(self) -> None:
-        strategy = puzzle.build_strategy(puzzle.ALGORITHM_SHA256_CHAIN)
+        strategy = puzzle.build_strategy(puzzle.ALGORITHM_SHA256)
         _, work_units, ciphertext, _ = puzzle.encrypt_with_strategy(
             SEED, timedelta(seconds=0.1), MESSAGE, strategy=strategy
         )

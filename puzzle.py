@@ -10,6 +10,7 @@ from typing import Callable
 
 from cryptography.fernet import Fernet
 
+ALGORITHM_SHA256 = "sha256"
 ALGORITHM_SHA256_CHAIN = "sha256-chain"
 ALGORITHM_SCRYPT = "scrypt"
 
@@ -73,7 +74,7 @@ class TimeLockStrategy(ABC):
 class Sha256ChainStrategy(TimeLockStrategy):
     """Sequential SHA-256 chain strategy."""
 
-    name = ALGORITHM_SHA256_CHAIN
+    name = ALGORITHM_SHA256
 
     def derive_by_time(
         self,
@@ -227,7 +228,7 @@ def build_strategy(
     scrypt_salt: bytes | None = None,
 ) -> TimeLockStrategy:
     """Build strategy instance for the selected algorithm."""
-    if algorithm == ALGORITHM_SHA256_CHAIN:
+    if algorithm in (ALGORITHM_SHA256, ALGORITHM_SHA256_CHAIN):
         return Sha256ChainStrategy()
     if algorithm == ALGORITHM_SCRYPT:
         return ScryptStrategy(
@@ -236,7 +237,7 @@ def build_strategy(
             p=scrypt_p,
             salt=scrypt_salt,
         )
-    raise ValueError("Unsupported algorithm. Use 'sha256-chain' or 'scrypt'.")
+    raise ValueError("Unsupported algorithm. Use 'sha256' or 'scrypt'.")
 
 
 def encrypt_with_strategy(
