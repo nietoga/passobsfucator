@@ -48,6 +48,7 @@ uv run pytest tests/ -v
 
 - `randpass.py` uses `secrets` (not `random`) for cryptographic security.
 - `puzzle.py` batches SHA-256 iterations in groups of 5,000 before checking the clock, keeping progress-callback overhead negligible.
-- `puzzle.py` also supports memory-hard `scrypt`, which is more resistant to commodity GPU attacks than pure hash chains.
+- `puzzle.py` uses a strategy pattern so both `sha256-chain` and memory-hard `scrypt` act as time-lock strategies for encryption and decryption.
+- progress bars are optional in the CLI (`--show-progress`) and are disabled by default to keep stdout JSON clean.
 - `main.py` uses `None` as the seed default (not a function call evaluated at import time) to ensure each invocation gets a fresh seed.
 - `progress.py` implements the context manager protocol so callers can use `with ProgressBar() as pb:`.

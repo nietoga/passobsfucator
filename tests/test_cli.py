@@ -46,7 +46,8 @@ class TestEncryptCommand:
         assert result.exit_code == 0
         data = _extract_json(result.output)
         assert "seed" in data
-        assert "iters" in data
+        assert "work_units" in data
+        assert data["algorithm"] == "sha256-chain"
         assert "encrypted" in data
 
     def test_output_file(self, tmp_path: Path) -> None:
@@ -75,7 +76,7 @@ class TestEncryptCommand:
         )
         assert result.exit_code == 0
         data = _extract_json(result.output)
-        assert data["iters"] > 0
+        assert data["work_units"] > 0
 
     def test_scrypt_stdout_output(self) -> None:
         result = runner.invoke(
@@ -85,6 +86,8 @@ class TestEncryptCommand:
                 "mypassword",
                 "--algorithm",
                 "scrypt",
+                "--time-in-seconds",
+                "1",
                 "--scrypt-n",
                 "1024",
                 "--scrypt-r",
@@ -99,10 +102,24 @@ class TestEncryptCommand:
         assert "scrypt" in data
         assert "salt" in data["scrypt"]
         assert "encrypted" in data
+        assert data["work_units"] > 0
 
     def test_invalid_algorithm_exits_with_error(self) -> None:
         result = runner.invoke(app, ["encrypt", "x", "--algorithm", "unknown"])
         assert result.exit_code != 0
+
+    def test_progress_hidden_by_default(self) -> None:
+        result = runner.invoke(app, ["encrypt", "x", "--time-in-seconds", "1"])
+        assert result.exit_code == 0
+        assert "100%|" not in result.output
+
+    def test_progress_shown_when_enabled(self) -> None:
+        result = runner.invoke(
+            app,
+            ["encrypt", "x", "--time-in-seconds", "1", "--show-progress"],
+        )
+        assert result.exit_code == 0
+        assert "100%" in result.output
 
 
 class TestDecryptCommand:
@@ -142,6 +159,8 @@ class TestDecryptCommand:
                 "gpu-resistant-secret",
                 "--algorithm",
                 "scrypt",
+                "--time-in-seconds",
+                "1",
                 "--scrypt-n",
                 "1024",
                 "--output-file",
@@ -169,3 +188,15 @@ class TestDecryptCommand:
         )
         result = runner.invoke(app, ["decrypt", str(bad_payload)])
         assert result.exit_code != 0
+
+    def test_decrypt_progress_hidden_by_default(self, tmp_path: Path) -> None:
+        enc_file = self._encrypt_to_file(tmp_path, "hello-world")
+        result = runner.invoke(app, ["decrypt", str(enc_file)])
+        assert result.exit_code == 0
+        assert "100%|" not in result.output
+
+    def test_decrypt_progress_shown_when_enabled(self, tmp_path: Path) -> None:
+        enc_file = self._encrypt_to_file(tmp_path, "hello-world")
+        result = runner.invoke(app, ["decrypt", str(enc_file), "--show-progress"])
+        assert result.exit_code == 0
+        assert "100%" in result.output

@@ -11,14 +11,14 @@ work. The tool supports both:
 ### 1) `sha256-chain` (time-lock mode)
 
 Encryption runs a sequential SHA-256 chain for the requested wall-clock
-duration and stores the iteration count. Decryption reproduces exactly that
-many rounds to rebuild the key.
+duration and stores the resulting `work_units`. Decryption reproduces exactly
+that many rounds to rebuild the key.
 
-### 2) `scrypt` (memory-hard mode)
+### 2) `scrypt` (memory-hard time-lock mode)
 
-Encryption derives a key using `scrypt(seed, salt, n, r, p)` and stores the
-scrypt parameters + salt in output JSON. Decryption replays the same scrypt
-derivation.
+Encryption repeatedly applies `scrypt(seed, salt, n, r, p)` for the requested
+time budget and stores `work_units` plus the scrypt parameters/salt in output
+JSON. Decryption replays exactly the same number of sequential rounds.
 
 Both modes then use a [Fernet](https://cryptography.io/en/latest/fernet/) key
 to encrypt/decrypt payload data.
@@ -58,6 +58,7 @@ uv run python main.py encrypt 'MyS3cr3t!' --time-in-seconds 10 --output-file loc
 ```bash
 uv run python main.py encrypt 'MyS3cr3t!' \
   --algorithm scrypt \
+  --time-in-seconds 10 \
   --scrypt-n 16384 \
   --scrypt-r 8 \
   --scrypt-p 1 \
@@ -71,6 +72,13 @@ uv run python main.py decrypt locked.json
 uv run python main.py decrypt locked-scrypt.json
 ```
 
+### Show progress bar (disabled by default)
+
+```bash
+uv run python main.py encrypt 'MyS3cr3t!' --time-in-seconds 10 --show-progress
+uv run python main.py decrypt locked.json --show-progress
+```
+
 ## Output JSON formats
 
 ### `sha256-chain`
@@ -79,7 +87,7 @@ uv run python main.py decrypt locked-scrypt.json
 {
   "algorithm": "sha256-chain",
   "seed": "example-seed",
-  "iters": 12345000,
+  "work_units": 12345000,
   "encrypted": "..."
 }
 ```
@@ -90,6 +98,7 @@ uv run python main.py decrypt locked-scrypt.json
 {
   "algorithm": "scrypt",
   "seed": "example-seed",
+  "work_units": 24,
   "scrypt": {
     "n": 16384,
     "r": 8,

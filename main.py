@@ -3,6 +3,7 @@
 import base64
 import binascii
 import json
+from contextlib import nullcontext
 from datetime import timedelta
 from pathlib import Path
 from typing import Annotated, Optional
@@ -14,6 +15,14 @@ import randpass
 from progress import ProgressBar
 
 app = typer.Typer(help="Password obfuscation utility using time-lock encryption.")
+
+
+def _progress_context(show_progress: bool) -> tuple[object, puzzle.ProgressCallback]:
+    """Return a context manager and callback based on progress-bar preference."""
+    if show_progress:
+        progress_bar = ProgressBar()
+        return progress_bar, progress_bar.set_progress
+    return nullcontext(), None
 
 
 @app.command()
@@ -66,6 +75,13 @@ def encrypt(
         int,
         typer.Option(help="scrypt p parallelization parameter (only for scrypt)."),
     ] = 1,
+    show_progress: Annotated[
+        bool,
+        typer.Option(
+            "--show-progress",
+            help="Show tqdm progress bar during key derivation.",
+        ),
+    ] = False,
 ) -> None:
     """Encrypt VALUE so that decryption requires ~TIME_IN_SECONDS of CPU time.
 
@@ -73,52 +89,36 @@ def encrypt(
     The exact decryption time may vary slightly depending on the machine's speed.
     """
     chosen_seed = seed or randpass.generate(10)
+    delta = timedelta(seconds=time_in_seconds)
 
-    if algorithm == puzzle.ALGORITHM_SHA256_CHAIN:
-        delta = timedelta(seconds=time_in_seconds)
-        with ProgressBar() as progress_bar:
-            _, iters, encrypted = puzzle.encrypt(
-                chosen_seed.encode(), delta, value.encode(), progress_bar.set_progress
-            )
-
-        output = {
-            "algorithm": puzzle.ALGORITHM_SHA256_CHAIN,
-            "seed": chosen_seed,
-            "iters": iters,
-            "encrypted": encrypted.decode(),
-        }
-    elif algorithm == puzzle.ALGORITHM_SCRYPT:
-        try:
-            with ProgressBar() as progress_bar:
-                _, salt, encrypted = puzzle.encrypt_scrypt(
-                    chosen_seed.encode(),
-                    value.encode(),
-                    n=scrypt_n,
-                    r=scrypt_r,
-                    p=scrypt_p,
-                    progress_callback=progress_bar.set_progress,
-                )
-        except ValueError as exc:
-            typer.echo(f"Error: {exc}", err=True)
-            raise typer.Exit(code=1) from exc
-
-        output = {
-            "algorithm": puzzle.ALGORITHM_SCRYPT,
-            "seed": chosen_seed,
-            "scrypt": {
-                "n": scrypt_n,
-                "r": scrypt_r,
-                "p": scrypt_p,
-                "salt": base64.urlsafe_b64encode(salt).decode(),
-            },
-            "encrypted": encrypted.decode(),
-        }
-    else:
-        typer.echo(
-            "Error: Unsupported algorithm. Use 'sha256-chain' or 'scrypt'.",
-            err=True,
+    try:
+        strategy = puzzle.build_strategy(
+            algorithm,
+            scrypt_n=scrypt_n,
+            scrypt_r=scrypt_r,
+            scrypt_p=scrypt_p,
         )
-        raise typer.Exit(code=1)
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    progress_context, progress_callback = _progress_context(show_progress)
+    with progress_context:
+        _, work_units, encrypted, strategy_payload = puzzle.encrypt_with_strategy(
+            chosen_seed.encode(),
+            delta,
+            value.encode(),
+            strategy=strategy,
+            progress_callback=progress_callback,
+        )
+
+    output = {
+        "algorithm": strategy.name,
+        "seed": chosen_seed,
+        "work_units": work_units,
+        "encrypted": encrypted.decode(),
+        **strategy_payload,
+    }
 
     if output_file is None:
         typer.echo(json.dumps(output, indent=4))
@@ -135,6 +135,13 @@ def decrypt(
         Optional[Path],
         typer.Option(help="Write JSON output here instead of stdout."),
     ] = None,
+    show_progress: Annotated[
+        bool,
+        typer.Option(
+            "--show-progress",
+            help="Show tqdm progress bar during key derivation replay.",
+        ),
+    ] = False,
 ) -> None:
     """Decrypt a value previously encrypted with the encrypt command."""
     try:
@@ -153,35 +160,29 @@ def decrypt(
         raise typer.Exit(code=1) from exc
 
     try:
-        if algorithm == puzzle.ALGORITHM_SHA256_CHAIN:
-            iters = int(payload["iters"])
-            with ProgressBar() as progress_bar:
-                _, decrypted = puzzle.decrypt(
-                    seed.encode(), iters, encrypted.encode(), progress_bar.set_progress
-                )
-        elif algorithm == puzzle.ALGORITHM_SCRYPT:
+        # Backward compatibility: old payloads used "iters", new payloads use "work_units".
+        work_units = int(payload["work_units"] if "work_units" in payload else payload["iters"])
+
+        strategy_kwargs: dict[str, int | bytes | None] = {}
+        if algorithm == puzzle.ALGORITHM_SCRYPT:
             scrypt_params = payload["scrypt"]
-            n = int(scrypt_params["n"])
-            r = int(scrypt_params["r"])
-            p = int(scrypt_params["p"])
-            salt = base64.urlsafe_b64decode(scrypt_params["salt"].encode())
-            with ProgressBar() as progress_bar:
-                _, decrypted = puzzle.decrypt_scrypt(
-                    seed.encode(),
-                    encrypted.encode(),
-                    salt=salt,
-                    n=n,
-                    r=r,
-                    p=p,
-                    progress_callback=progress_bar.set_progress,
-                )
-        else:
-            typer.echo(
-                "Error reading input file: unsupported algorithm. "
-                "Use 'sha256-chain' or 'scrypt'.",
-                err=True,
+            strategy_kwargs = {
+                "scrypt_n": int(scrypt_params["n"]),
+                "scrypt_r": int(scrypt_params["r"]),
+                "scrypt_p": int(scrypt_params["p"]),
+                "scrypt_salt": base64.urlsafe_b64decode(scrypt_params["salt"].encode()),
+            }
+
+        strategy = puzzle.build_strategy(algorithm, **strategy_kwargs)
+        progress_context, progress_callback = _progress_context(show_progress)
+        with progress_context:
+            _, decrypted = puzzle.decrypt_with_strategy(
+                seed.encode(),
+                work_units,
+                encrypted.encode(),
+                strategy=strategy,
+                progress_callback=progress_callback,
             )
-            raise typer.Exit(code=1)
     except (KeyError, TypeError, ValueError, binascii.Error) as exc:
         typer.echo(f"Error reading {input_file}: malformed encryption payload ({exc})", err=True)
         raise typer.Exit(code=1) from exc
