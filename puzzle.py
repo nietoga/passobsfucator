@@ -5,11 +5,15 @@ Reference: https://asecuritysite.com/encryption/pow
 
 import base64
 from datetime import timedelta
-from hashlib import sha256
+from hashlib import scrypt, sha256
+from secrets import token_bytes
 from time import monotonic
 from typing import Callable
 
 from cryptography.fernet import Fernet
+
+ALGORITHM_SHA256_CHAIN = "sha256-chain"
+ALGORITHM_SCRYPT = "scrypt"
 
 # How often to sample wall-clock time and fire progress callbacks in the
 # tight hashing loop. Checking time() every iteration is measurably slow;
@@ -23,6 +27,23 @@ def _hash_chain(seed: bytes, count: int) -> bytes:
     for _ in range(count):
         h = sha256(h).digest()
     return h
+
+
+def _validate_scrypt_params(n: int, r: int, p: int) -> None:
+    """Validate scrypt work-factor parameters."""
+    if n < 2 or (n & (n - 1)) != 0:
+        raise ValueError("scrypt n must be a power of two and >= 2")
+    if r < 1:
+        raise ValueError("scrypt r must be >= 1")
+    if p < 1:
+        raise ValueError("scrypt p must be >= 1")
+
+
+def generate_scrypt_key(seed: bytes, salt: bytes, n: int, r: int, p: int) -> bytes:
+    """Derive a Fernet-compatible key using scrypt (memory-hard)."""
+    _validate_scrypt_params(n, r, p)
+    key = scrypt(seed, salt=salt, n=n, r=r, p=p, dklen=32)
+    return base64.urlsafe_b64encode(key)
 
 
 def generate_by_time(
@@ -146,4 +167,43 @@ def decrypt(
     """
     key = generate_by_iters(keyseed, iterations, progress_callback)
     decrypted = Fernet(key).decrypt(encrypted)
+    return key, decrypted
+
+
+def encrypt_scrypt(
+    keyseed: bytes,
+    message: bytes,
+    n: int = 2**14,
+    r: int = 8,
+    p: int = 1,
+    salt: bytes | None = None,
+    progress_callback: Callable[[int], None] | None = None,
+) -> tuple[bytes, bytes, bytes]:
+    """Encrypt message using an scrypt-derived key."""
+    chosen_salt = salt or token_bytes(16)
+    if progress_callback:
+        progress_callback(0)
+    key = generate_scrypt_key(keyseed, chosen_salt, n=n, r=r, p=p)
+    encrypted = Fernet(key).encrypt(message)
+    if progress_callback:
+        progress_callback(100)
+    return key, chosen_salt, encrypted
+
+
+def decrypt_scrypt(
+    keyseed: bytes,
+    encrypted: bytes,
+    salt: bytes,
+    n: int = 2**14,
+    r: int = 8,
+    p: int = 1,
+    progress_callback: Callable[[int], None] | None = None,
+) -> tuple[bytes, bytes]:
+    """Decrypt message using an scrypt-derived key."""
+    if progress_callback:
+        progress_callback(0)
+    key = generate_scrypt_key(keyseed, salt=salt, n=n, r=r, p=p)
+    decrypted = Fernet(key).decrypt(encrypted)
+    if progress_callback:
+        progress_callback(100)
     return key, decrypted

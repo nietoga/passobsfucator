@@ -97,3 +97,79 @@ class TestEncryptDecrypt:
         assert isinstance(key, bytes)
         assert isinstance(iters, int)
         assert isinstance(ciphertext, bytes)
+
+
+class TestScrypt:
+    def test_generate_scrypt_key_returns_valid_fernet_key(self) -> None:
+        key = puzzle.generate_scrypt_key(
+            b"scrypt-seed",
+            salt=b"0123456789abcdef",
+            n=2**14,
+            r=8,
+            p=1,
+        )
+        decoded = base64.urlsafe_b64decode(key)
+        assert len(decoded) == 32
+
+    def test_generate_scrypt_key_deterministic_with_same_inputs(self) -> None:
+        key1 = puzzle.generate_scrypt_key(
+            b"seed",
+            salt=b"0123456789abcdef",
+            n=2**14,
+            r=8,
+            p=1,
+        )
+        key2 = puzzle.generate_scrypt_key(
+            b"seed",
+            salt=b"0123456789abcdef",
+            n=2**14,
+            r=8,
+            p=1,
+        )
+        assert key1 == key2
+
+    def test_generate_scrypt_key_changes_when_salt_changes(self) -> None:
+        key1 = puzzle.generate_scrypt_key(
+            b"seed",
+            salt=b"salt-000000000001",
+            n=2**14,
+            r=8,
+            p=1,
+        )
+        key2 = puzzle.generate_scrypt_key(
+            b"seed",
+            salt=b"salt-000000000002",
+            n=2**14,
+            r=8,
+            p=1,
+        )
+        assert key1 != key2
+
+    def test_encrypt_decrypt_scrypt_round_trip(self) -> None:
+        _, salt, ciphertext = puzzle.encrypt_scrypt(
+            b"scrypt-seed",
+            MESSAGE,
+            n=2**14,
+            r=8,
+            p=1,
+            salt=b"0123456789abcdef",
+        )
+        _, decrypted = puzzle.decrypt_scrypt(
+            b"scrypt-seed",
+            ciphertext,
+            salt=salt,
+            n=2**14,
+            r=8,
+            p=1,
+        )
+        assert decrypted == MESSAGE
+
+    def test_encrypt_scrypt_invalid_n_raises(self) -> None:
+        with pytest.raises(ValueError, match="power of two"):
+            puzzle.encrypt_scrypt(
+                b"scrypt-seed",
+                MESSAGE,
+                n=1000,
+                r=8,
+                p=1,
+            )

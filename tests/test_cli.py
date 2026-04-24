@@ -77,6 +77,33 @@ class TestEncryptCommand:
         data = _extract_json(result.output)
         assert data["iters"] > 0
 
+    def test_scrypt_stdout_output(self) -> None:
+        result = runner.invoke(
+            app,
+            [
+                "encrypt",
+                "mypassword",
+                "--algorithm",
+                "scrypt",
+                "--scrypt-n",
+                "1024",
+                "--scrypt-r",
+                "8",
+                "--scrypt-p",
+                "1",
+            ],
+        )
+        assert result.exit_code == 0
+        data = _extract_json(result.output)
+        assert data["algorithm"] == "scrypt"
+        assert "scrypt" in data
+        assert "salt" in data["scrypt"]
+        assert "encrypted" in data
+
+    def test_invalid_algorithm_exits_with_error(self) -> None:
+        result = runner.invoke(app, ["encrypt", "x", "--algorithm", "unknown"])
+        assert result.exit_code != 0
+
 
 class TestDecryptCommand:
     def _encrypt_to_file(self, tmp_path: Path, plaintext: str = "secret") -> Path:
@@ -104,4 +131,41 @@ class TestDecryptCommand:
 
     def test_missing_input_file_exits_with_error(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["decrypt", str(tmp_path / "nonexistent.json")])
+        assert result.exit_code != 0
+
+    def test_round_trip_with_scrypt(self, tmp_path: Path) -> None:
+        enc_file = tmp_path / "enc_scrypt.json"
+        encrypt_result = runner.invoke(
+            app,
+            [
+                "encrypt",
+                "gpu-resistant-secret",
+                "--algorithm",
+                "scrypt",
+                "--scrypt-n",
+                "1024",
+                "--output-file",
+                str(enc_file),
+            ],
+        )
+        assert encrypt_result.exit_code == 0
+
+        result = runner.invoke(app, ["decrypt", str(enc_file)])
+        assert result.exit_code == 0
+        data = _extract_json(result.output)
+        assert data["algorithm"] == "scrypt"
+        assert data["decrypted"] == "gpu-resistant-secret"
+
+    def test_decrypt_unknown_algorithm_exits(self, tmp_path: Path) -> None:
+        bad_payload = tmp_path / "bad.json"
+        bad_payload.write_text(
+            json.dumps(
+                {
+                    "algorithm": "unknown",
+                    "seed": "seed",
+                    "encrypted": "x",
+                }
+            )
+        )
+        result = runner.invoke(app, ["decrypt", str(bad_payload)])
         assert result.exit_code != 0
